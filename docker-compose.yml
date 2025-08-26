@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  xget:
+    build: .
+    ports:
+      - "3000:3000"   # HTTP port
+      - "3443:3443"   # HTTPS port
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HTTPS_PORT=3443
+      - SSL_ENABLED=true
+    volumes:
+      # Mount SSL certificates from host (optional, certificates are also copied in Dockerfile)
+      - ./domain.crt:/app/domain.crt:ro
+      - ./domain.key:/app/domain.key:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:3443/api/health", "||", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Nginx reverse proxy for production (commented out by default)
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./domain.crt:/etc/ssl/certs/domain.crt:ro
+  #     - ./domain.key:/etc/ssl/private/domain.key:ro
+  #   depends_on:
+  #     - xget
+  #   restart: unless-stopped

@@ -1,9 +1,24 @@
 import express from 'express';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
 import handler from './api/[...path].js';
 import healthHandler from './api/health.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+const SSL_ENABLED = process.env.SSL_ENABLED === 'true';
+
+// SSL redirect middleware (only when SSL is enabled)
+if (SSL_ENABLED) {
+  app.use((req, res, next) => {
+    if (req.header('x-forwarded-proto') !== 'https' && !req.secure) {
+      return res.redirect(`https://${req.header('host')}${req.url}`);
+    }
+    next();
+  });
+}
 
 // Middleware to parse JSON bodies
 app.use(express.json());
@@ -72,7 +87,27 @@ app.use('*', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Xget server running on port ${PORT}`);
-  console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
-});
+if (SSL_ENABLED) {
+  // SSL configuration
+  const sslOptions = {
+    key: fs.readFileSync(path.join(process.cwd(), 'domain.key')),
+    cert: fs.readFileSync(path.join(process.cwd(), 'domain.crt'))
+  };
+
+  // Create HTTPS server
+  https.createServer(sslOptions, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+    console.log(`🚀 Xget HTTPS server running on port ${HTTPS_PORT}`);
+    console.log(`📡 Health check: https://localhost:${HTTPS_PORT}/api/health`);
+  });
+
+  // Optionally, also run HTTP server for redirects or health checks
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Xget HTTP server running on port ${PORT} (redirect to HTTPS)`);
+  });
+} else {
+  // Standard HTTP server
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Xget server running on port ${PORT}`);
+    console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
+  });
+}
