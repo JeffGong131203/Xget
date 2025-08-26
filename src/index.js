@@ -377,9 +377,64 @@ async function handleRequest(request, env, ctx) {
     const isAI = isAIInferenceRequest(request, url);
 
     // Check cache first (skip cache for Git, Docker, and AI inference operations)
-    /** @type {Cache} */
-    // @ts-ignore - Cloudflare Workers cache API
-    const cache = caches.default;
+    let cache;
+
+    // Environment detection and cache initialization
+    if (typeof globalThis.caches !== 'undefined' && globalThis.caches.default) {
+      // Cloudflare Workers environment - use native caches API
+      cache = globalThis.caches.default;
+    } else {
+      // Node.js environment - create memory-based cache adapter
+      const memoryStore = new Map();
+
+      cache = {
+        async match(requestInput) {
+          const key = typeof requestInput === 'string' ? requestInput : requestInput.url;
+          const cached = memoryStore.get(key);
+
+          if (!cached) {
+            return undefined;
+          }
+
+          // Check if cache entry has expired (simple TTL implementation)
+          if (Date.now() > cached.expiry) {
+            memoryStore.delete(key);
+            return undefined;
+          }
+
+          // Clone response to avoid body already read issues
+          return new Response(cached.body, {
+            status: cached.status,
+            statusText: cached.statusText,
+            headers: new Headers(cached.headers)
+          });
+        },
+
+        async put(requestInput, responseInput) {
+          const key = typeof requestInput === 'string' ? requestInput : requestInput.url;
+
+          // Don't cache if response is not ok
+          if (!responseInput.ok && responseInput.status !== 206) {
+            return;
+          }
+
+          // Clone response to avoid consuming the original
+          const responseClone = responseInput.clone();
+          const body = await responseClone.arrayBuffer();
+
+          // Simple TTL: cache for 1 hour (3600000 ms)
+          const expiry = Date.now() + (config.CACHE_DURATION * 1000);
+
+          memoryStore.set(key, {
+            body,
+            status: responseInput.status,
+            statusText: responseInput.statusText,
+            headers: Object.fromEntries(responseInput.headers.entries()),
+            expiry
+          });
+        }
+      };
+    }
     const cacheKey = new Request(targetUrl, request);
     let response;
 
